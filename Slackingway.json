@@ -1,0 +1,14 @@
+{
+  "Author": "KuroZantetsuken",
+  "Name": "Slackingway",
+  "Punchline": "Limits framerate based on a percentage of max performance to keep GPU usage below 100%.",
+  "Description": "This plugin ensures the GPU cannot be fully utilized to leave enough headroom for Windows to other things, preventing other apps like Discord and YouTube from freezing when FFXIV is in focus.",
+  "InternalName": "Slackingway",
+  "AssemblyVersion": "1.0",
+  "ApplicableVersion": "any",
+  "DalamudApiLevel": 15,
+  "LoadRequiredState": 0,
+  "LoadSync": false,
+  "LoadBehavior": 0,
+  "AcceptsFeedback": true
+}
