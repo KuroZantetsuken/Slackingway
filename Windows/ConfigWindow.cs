@@ -8,19 +8,21 @@ namespace Slackingway.Windows
     public class ConfigWindow : Window, IDisposable
     {
         private readonly Configuration configuration;
+        private readonly Plugin plugin;
 
         public ConfigWindow(Plugin plugin)
             : base("Relative Performance Limiter Config", ImGuiWindowFlags.NoScrollbar | ImGuiWindowFlags.NoScrollWithMouse)
         {
-            this.Size = new Vector2(400, 200);
+            this.Size = new Vector2(400, 300);
             this.SizeCondition = ImGuiCond.FirstUseEver;
             this.SizeConstraints = new WindowSizeConstraints
             {
-                MinimumSize = new Vector2(400, 200),
+                MinimumSize = new Vector2(400, 300),
                 MaximumSize = new Vector2(float.MaxValue, float.MaxValue)
             };
 
             this.configuration = plugin.Configuration;
+            this.plugin = plugin;
         }
 
         public void Dispose()
@@ -54,7 +56,28 @@ namespace Slackingway.Windows
                 this.configuration.Save();
             }
 
-            ImGui.TextWrapped("Lower percentages will reduce GPU load further but increase input latency and decrease framerate.");
+            ImGui.TextWrapped("Lower until other processes have enough headroom to function properly. Recommended to set this in a performance intensive scene.");
+
+            ImGui.Spacing();
+            ImGui.Separator();
+            ImGui.Spacing();
+
+            ImGui.Text($"Current GPU Usage: {this.plugin.LastGpuUsage:F1}%");
+            ImGui.Text($"Baseline Max Usage: {this.configuration.BaselineGpuUsage:F1}%");
+
+            if (this.plugin.IsCalibrating)
+            {
+                ImGui.TextColored(new Vector4(1, 1, 0, 1), "Calibrating...");
+            }
+            else
+            {
+                if (ImGui.Button("Calibrate Baseline"))
+                {
+                    this.plugin.StartCalibration();
+                }
+                ImGui.SameLine();
+                ImGui.TextWrapped("Set this in a GPU limited scenario to calibrate peak usage.");
+            }
         }
     }
 }
