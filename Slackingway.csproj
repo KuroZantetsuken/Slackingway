@@ -3,6 +3,7 @@
   <PropertyGroup>
     <Version>1.0</Version>
     <PackageProjectUrl>https://github.com/KuroZantetsuken/Slackingway</PackageProjectUrl>
+    <PackageLicenseExpression>GPL-3.0-or-later</PackageLicenseExpression>
     <IsPackable>false</IsPackable>
   </PropertyGroup>
   <ItemGroup>
