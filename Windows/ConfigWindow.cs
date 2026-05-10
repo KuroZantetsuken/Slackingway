@@ -49,10 +49,10 @@ namespace Slackingway.Windows
 
             ImGui.Spacing();
 
-            var targetPercentage = (int)this.configuration.TargetPercentage;
-            if (ImGui.SliderInt("Target Performance %", ref targetPercentage, 10, 99, "%d%%"))
+            var targetGpuUsage = (int)this.configuration.TargetGpuUsage;
+            if (ImGui.SliderInt("Target GPU Usage %", ref targetGpuUsage, 1, 100, "%d%%"))
             {
-                this.configuration.TargetPercentage = targetPercentage;
+                this.configuration.TargetGpuUsage = targetGpuUsage;
                 this.configuration.Save();
             }
 

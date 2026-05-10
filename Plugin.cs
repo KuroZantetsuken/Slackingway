@@ -156,7 +156,7 @@ namespace Slackingway
 
                 if (this.Configuration.IsEnabled && this.LastGpuUsage > 0)
                 {
-                    float targetGpuUsage = (this.Configuration.TargetPercentage / 100f) * this.Configuration.BaselineGpuUsage;
+                    float targetGpuUsage = this.Configuration.TargetGpuUsage;
                     if (targetGpuUsage <= 0.01f) targetGpuUsage = 0.01f;
 
                     // PI Controller (Velocity Form)

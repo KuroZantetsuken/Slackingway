@@ -9,7 +9,7 @@ namespace Slackingway
         public int Version { get; set; } = 0;
 
         public bool IsEnabled { get; set; } = true;
-        public float TargetPercentage { get; set; } = 90.0f;
+        public float TargetGpuUsage { get; set; } = 90.0f;
         public bool EnableLogging { get; set; } = false;
         public float BaselineGpuUsage { get; set; } = 100.0f;
 
