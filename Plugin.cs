@@ -35,9 +35,6 @@ namespace Slackingway
         private double previousSleepTimeMs = 0;
 
         private Stopwatch gpuPollStopwatch = new Stopwatch();
-        public bool IsCalibrating { get; private set; } = false;
-        private Stopwatch calibrationStopwatch = new Stopwatch();
-        private List<float> calibrationSamples = new();
 
         public float LastGpuUsage { get; private set; } = 0;
 
@@ -54,9 +51,6 @@ namespace Slackingway
 
         // Used for gradual transition when re-enabling
         private bool wasDisabled = true;
-
-        public bool ShowCalibrationSuccess { get; private set; } = false;
-        private Stopwatch calibrationSuccessStopwatch = new Stopwatch();
 
         public Plugin()
         {
@@ -84,14 +78,6 @@ namespace Slackingway
             this.gpuPollStopwatch.Start();
             this.logStopwatch.Start();
             Framework.Update += OnUpdate;
-        }
-
-        public void StartCalibration()
-        {
-            IsCalibrating = true;
-            ShowCalibrationSuccess = false;
-            calibrationSamples.Clear();
-            calibrationStopwatch.Restart();
         }
 
         public void Dispose()
@@ -139,33 +125,6 @@ namespace Slackingway
                 this.gpuPollStopwatch.Restart();
                 this.LastGpuUsage = this.GpuMonitor.GetCurrentUtilization();
 
-                if (IsCalibrating)
-                {
-                    calibrationSamples.Add(this.LastGpuUsage);
-                    if (calibrationStopwatch.ElapsedMilliseconds > 3000)
-                    {
-                        IsCalibrating = false;
-                        calibrationStopwatch.Stop();
-                        if (calibrationSamples.Count > 0)
-                        {
-                            // Use max usage seen during calibration
-                            float maxUsage = calibrationSamples.Max();
-
-                            if (maxUsage <= 0) maxUsage = 100f; // fallback
-                            this.Configuration.BaselineGpuUsage = (float)Math.Round(maxUsage);
-                            this.Configuration.Save();
-                        }
-                        ShowCalibrationSuccess = true;
-                        calibrationSuccessStopwatch.Restart();
-                    }
-                }
-                
-                if (ShowCalibrationSuccess && calibrationSuccessStopwatch.ElapsedMilliseconds > 2000)
-                {
-                    ShowCalibrationSuccess = false;
-                    calibrationSuccessStopwatch.Stop();
-                }
-
                 if (this.Configuration.IsEnabled && this.LastGpuUsage > 0)
                 {
                     float targetGpuUsage = this.Configuration.TargetGpuUsage;
@@ -195,7 +154,7 @@ namespace Slackingway
                 }
             }
 
-            if (!this.Configuration.IsEnabled || IsCalibrating)
+            if (!this.Configuration.IsEnabled)
             {
                 this.previousSleepTimeMs = 0;
                 this.isControllerReset = true;
@@ -255,7 +214,7 @@ namespace Slackingway
                 {
                     this.logStopwatch.Restart();
                     double currentFps = 1000.0 / elapsedMs;
-                    Log.Info($"[Slackingway] FPS: {currentFps:F1} | GPU Usage: {this.LastGpuUsage:F1}% | Baseline: {this.Configuration.BaselineGpuUsage:F0}% | TargetFrame: {this.targetFrameTimeMs:F2}ms | Active: {activeTimeMs:F2}ms | ReqSleep: {requiredSleepMs:F2}ms | ActualSleep: {actualSleepMs:F2}ms");
+                    Log.Info($"[Slackingway] FPS: {currentFps:F1} | GPU Usage: {this.LastGpuUsage:F1}% | TargetFrame: {this.targetFrameTimeMs:F2}ms | Active: {activeTimeMs:F2}ms | ReqSleep: {requiredSleepMs:F2}ms | ActualSleep: {actualSleepMs:F2}ms");
                 }
             }
         }
