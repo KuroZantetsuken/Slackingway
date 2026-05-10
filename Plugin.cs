@@ -6,6 +6,7 @@ using Dalamud.Interface.Windowing;
 using System;
 using System.Collections.Generic;
 using System.Diagnostics;
+using System.Linq;
 using System.Runtime.InteropServices;
 using System.Runtime.Versioning;
 using System.Threading;
@@ -43,8 +44,20 @@ namespace Slackingway
 
         private double smoothedFrameTimeMs = 16.6;
         private double targetFrameTimeMs = 16.6;
+        
+        // PI Controller state (Velocity form)
+        private double lastError = 0;
+        private bool isControllerReset = true;
+        private const double Kp = 0.05; // ms per % change in error
+        private const double Ki = 0.10; // ms per % error per second
 
-        private int logCounter = 0;
+        private Stopwatch logStopwatch = new Stopwatch();
+
+        // Used for gradual transition when re-enabling
+        private bool wasDisabled = true;
+
+        public bool ShowCalibrationSuccess { get; private set; } = false;
+        private Stopwatch calibrationSuccessStopwatch = new Stopwatch();
 
         public Plugin()
         {
@@ -66,12 +79,14 @@ namespace Slackingway
 
             this.frameStopwatch.Start();
             this.gpuPollStopwatch.Start();
+            this.logStopwatch.Start();
             Framework.Update += OnUpdate;
         }
 
         public void StartCalibration()
         {
             IsCalibrating = true;
+            ShowCalibrationSuccess = false;
             calibrationSamples.Clear();
             calibrationStopwatch.Restart();
         }
@@ -104,7 +119,7 @@ namespace Slackingway
 
             if (elapsedMs > 0 && elapsedMs < 1000)
             {
-                this.smoothedFrameTimeMs = (this.smoothedFrameTimeMs * 0.95) + (elapsedMs * 0.05);
+                this.smoothedFrameTimeMs = (this.smoothedFrameTimeMs * 0.85) + (elapsedMs * 0.15);
             }
 
             if (this.gpuPollStopwatch.ElapsedMilliseconds >= 1000)
@@ -122,25 +137,46 @@ namespace Slackingway
                         if (calibrationSamples.Count > 0)
                         {
                             // Use max usage seen during calibration
-                            float maxUsage = 0;
-                            foreach (var sample in calibrationSamples)
-                                if (sample > maxUsage) maxUsage = sample;
+                            float maxUsage = calibrationSamples.Max();
 
                             if (maxUsage <= 0) maxUsage = 100f; // fallback
-                            this.Configuration.BaselineGpuUsage = maxUsage;
+                            this.Configuration.BaselineGpuUsage = (float)Math.Round(maxUsage);
                             this.Configuration.Save();
                         }
+                        ShowCalibrationSuccess = true;
+                        calibrationSuccessStopwatch.Restart();
                     }
                 }
-                else if (this.Configuration.IsEnabled && this.LastGpuUsage > 0)
+                
+                if (ShowCalibrationSuccess && calibrationSuccessStopwatch.ElapsedMilliseconds > 2000)
+                {
+                    ShowCalibrationSuccess = false;
+                    calibrationSuccessStopwatch.Stop();
+                }
+
+                if (this.Configuration.IsEnabled && this.LastGpuUsage > 0)
                 {
                     float targetGpuUsage = (this.Configuration.TargetPercentage / 100f) * this.Configuration.BaselineGpuUsage;
                     if (targetGpuUsage <= 0.01f) targetGpuUsage = 0.01f;
 
-                    double newTargetFrameTimeMs = this.smoothedFrameTimeMs * (this.LastGpuUsage / targetGpuUsage);
+                    // PI Controller (Velocity Form)
+                    // Output directly modulates targetFrameTimeMs. Windup is naturally bounded by clamping targetFrameTimeMs,
+                    // though recovery from prolonged saturation still requires stepping back down.
+                    // Positive error (usage > target) means we need more sleep (larger frame time).
+                    double error = this.LastGpuUsage - targetGpuUsage;
                     
-                    // Smooth the target frame time update
-                    this.targetFrameTimeMs = (this.targetFrameTimeMs * 0.7) + (newTargetFrameTimeMs * 0.3);
+                    // Prevent deltaError spike on the very first tick after re-enabling
+                    if (this.isControllerReset)
+                    {
+                        this.lastError = error;
+                        this.isControllerReset = false;
+                    }
+
+                    double deltaError = error - this.lastError;
+                    this.lastError = error;
+
+                    double adjustmentMs = (Kp * deltaError) + (Ki * error);
+                    this.targetFrameTimeMs += adjustmentMs;
 
                     if (this.targetFrameTimeMs > 1000) this.targetFrameTimeMs = 1000;
                     if (this.targetFrameTimeMs < 1) this.targetFrameTimeMs = 1;
@@ -150,9 +186,23 @@ namespace Slackingway
             if (!this.Configuration.IsEnabled || IsCalibrating)
             {
                 this.previousSleepTimeMs = 0;
-                // Keep target frame time somewhat updated when disabled
+                this.isControllerReset = true;
+                this.wasDisabled = true;
+                // Keep target frame time roughly aligned with current performance
                 this.targetFrameTimeMs = this.smoothedFrameTimeMs;
                 return;
+            }
+
+            if (this.wasDisabled)
+            {
+                // Gradual transition: blend the target frame time from the smoothed real time
+                // so it doesn't snap abruptly
+                this.targetFrameTimeMs = (this.targetFrameTimeMs * 0.8) + (this.smoothedFrameTimeMs * 0.2);
+                // When they get close enough, consider transition done
+                if (Math.Abs(this.targetFrameTimeMs - this.smoothedFrameTimeMs) < 1.0)
+                {
+                    this.wasDisabled = false;
+                }
             }
 
             double activeTimeMs = elapsedMs - this.previousSleepTimeMs;
@@ -189,12 +239,11 @@ namespace Slackingway
 
             if (this.Configuration.EnableLogging)
             {
-                this.logCounter++;
-                if (this.logCounter >= 60)
+                if (this.logStopwatch.ElapsedMilliseconds >= 1000) // Log every 1 second
                 {
-                    this.logCounter = 0;
+                    this.logStopwatch.Restart();
                     double currentFps = 1000.0 / elapsedMs;
-                    Log.Info($"[Slackingway] FPS: {currentFps:F1} | GPU Usage: {this.LastGpuUsage:F1}% | Baseline: {this.Configuration.BaselineGpuUsage:F1}% | TargetFrame: {this.targetFrameTimeMs:F2}ms | Active: {activeTimeMs:F2}ms | ReqSleep: {requiredSleepMs:F2}ms | ActualSleep: {actualSleepMs:F2}ms");
+                    Log.Info($"[Slackingway] FPS: {currentFps:F1} | GPU Usage: {this.LastGpuUsage:F1}% | Baseline: {this.Configuration.BaselineGpuUsage:F0}% | TargetFrame: {this.targetFrameTimeMs:F2}ms | Active: {activeTimeMs:F2}ms | ReqSleep: {requiredSleepMs:F2}ms | ActualSleep: {actualSleepMs:F2}ms");
                 }
             }
         }
@@ -214,7 +263,17 @@ namespace Slackingway
 
             while (Stopwatch.GetTimestamp() < targetTicks)
             {
-                Thread.SpinWait(10);
+                long remainingTicks = targetTicks - Stopwatch.GetTimestamp();
+                double remainingMs = remainingTicks * 1000.0 / Stopwatch.Frequency;
+                
+                if (remainingMs > 1.5)
+                {
+                    Thread.Sleep(1);
+                }
+                else
+                {
+                    Thread.SpinWait(10);
+                }
             }
         }
     }
