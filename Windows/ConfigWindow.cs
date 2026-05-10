@@ -11,7 +11,7 @@ namespace Slackingway.Windows
         private readonly Plugin plugin;
 
         public ConfigWindow(Plugin plugin)
-            : base("Relative Performance Limiter Config", ImGuiWindowFlags.NoScrollbar | ImGuiWindowFlags.NoScrollWithMouse)
+            : base("Slackingway Config", ImGuiWindowFlags.NoScrollbar | ImGuiWindowFlags.NoScrollWithMouse)
         {
             this.Size = new Vector2(400, 300);
             this.SizeCondition = ImGuiCond.FirstUseEver;
@@ -56,14 +56,12 @@ namespace Slackingway.Windows
                 this.configuration.Save();
             }
 
-            ImGui.TextWrapped("Lower until other processes have enough headroom to function properly. Recommended to set this in a performance intensive scene.");
+            ImGui.TextWrapped("Lower until other processes have enough headroom to function properly.");
+            ImGui.TextWrapped("Recommended to set this in a GPU limited scene while playing a video on a secondary monitor.");
 
             ImGui.Spacing();
             ImGui.Separator();
             ImGui.Spacing();
-
-            ImGui.Text($"Current GPU Usage: {this.plugin.LastGpuUsage:F1}%");
-            ImGui.Text($"Baseline Max Usage: {this.configuration.BaselineGpuUsage:F1}%");
 
             if (this.plugin.IsCalibrating)
             {
@@ -75,9 +73,11 @@ namespace Slackingway.Windows
                 {
                     this.plugin.StartCalibration();
                 }
-                ImGui.SameLine();
-                ImGui.TextWrapped("Set this in a GPU limited scenario to calibrate peak usage.");
+                ImGui.TextWrapped("Set this in a GPU limited scene to calibrate peak usage.");
             }
+
+            ImGui.Text($"Current GPU Usage: {this.plugin.LastGpuUsage:F1}%");
+            ImGui.Text($"Baseline Max Usage: {this.configuration.BaselineGpuUsage:F1}%");
         }
     }
 }
