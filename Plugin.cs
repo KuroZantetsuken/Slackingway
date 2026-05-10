@@ -27,7 +27,6 @@ namespace Slackingway
 
         public Configuration Configuration { get; init; }
 
-        public readonly WindowSystem WindowSystem = new("RelativePerformanceLimiter");
         private ConfigWindow ConfigWindow { get; init; }
 
         public GpuMonitor GpuMonitor { get; init; }
@@ -61,20 +60,24 @@ namespace Slackingway
 
         public Plugin()
         {
+            KamiToolKit.KamiToolKitLibrary.Initialize(PluginInterface, "Slackingway");
+
             Configuration = PluginInterface.GetPluginConfig() as Configuration ?? new Configuration();
 
             GpuMonitor = new GpuMonitor();
             GpuMonitor.Initialize();
 
-            ConfigWindow = new ConfigWindow(this);
-            WindowSystem.AddWindow(ConfigWindow);
+            ConfigWindow = new ConfigWindow(this)
+            {
+                InternalName = "SlackingwayConfig",
+                Title = "Slackingway Config"
+            };
 
             CommandManager.AddHandler(CommandName, new CommandInfo(OnCommand)
             {
                 HelpMessage = "Opens the configuration window for the Slackingway."
             });
 
-            PluginInterface.UiBuilder.Draw += WindowSystem.Draw;
             PluginInterface.UiBuilder.OpenConfigUi += ToggleConfigUi;
 
             this.frameStopwatch.Start();
@@ -95,11 +98,10 @@ namespace Slackingway
         {
             Framework.Update -= OnUpdate;
 
-            PluginInterface.UiBuilder.Draw -= WindowSystem.Draw;
             PluginInterface.UiBuilder.OpenConfigUi -= ToggleConfigUi;
 
-            WindowSystem.RemoveAllWindows();
             ConfigWindow.Dispose();
+            KamiToolKit.KamiToolKitLibrary.Dispose();
 
             CommandManager.RemoveHandler(CommandName);
             GpuMonitor.Dispose();
@@ -110,7 +112,17 @@ namespace Slackingway
             ToggleConfigUi();
         }
 
-        public void ToggleConfigUi() => ConfigWindow.Toggle();
+        public void ToggleConfigUi()
+        {
+            if (ConfigWindow.IsOpen)
+            {
+                ConfigWindow.Close();
+            }
+            else
+            {
+                ConfigWindow.Open();
+            }
+        }
 
         private void OnUpdate(IFramework framework)
         {
