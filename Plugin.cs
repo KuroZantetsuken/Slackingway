@@ -7,8 +7,11 @@ using System;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.Runtime.InteropServices;
+using System.Runtime.Versioning;
 using System.Threading;
 using Slackingway.Windows;
+
+[assembly: SupportedOSPlatform("windows")]
 
 namespace Slackingway
 {

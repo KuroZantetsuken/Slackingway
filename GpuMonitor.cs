@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.Runtime.InteropServices;
+using System.Runtime.Versioning;
 using System.Threading.Tasks;
 
 namespace Slackingway
@@ -9,6 +10,7 @@ namespace Slackingway
     /// <summary>
     /// Monitors GPU usage for the current process using the native Windows Performance Data Helper (PDH) API.
     /// </summary>
+    [SupportedOSPlatform("windows")]
     public class GpuMonitor : IDisposable
     {
         #region P/Invoke Definitions for PDH.dll
