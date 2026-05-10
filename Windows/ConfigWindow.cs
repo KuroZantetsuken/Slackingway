@@ -17,7 +17,7 @@ namespace Slackingway.Windows
             this.SizeCondition = ImGuiCond.FirstUseEver;
             this.SizeConstraints = new WindowSizeConstraints
             {
-                MinimumSize = new Vector2(400, 300),
+                MinimumSize = new Vector2(300, 200),
                 MaximumSize = new Vector2(float.MaxValue, float.MaxValue)
             };
 
@@ -49,8 +49,8 @@ namespace Slackingway.Windows
 
             ImGui.Spacing();
 
-            var targetPercentage = this.configuration.TargetPercentage;
-            if (ImGui.SliderFloat("Target Performance %", ref targetPercentage, 10.0f, 99.0f, "%.1f%%"))
+            var targetPercentage = (int)this.configuration.TargetPercentage;
+            if (ImGui.SliderInt("Target Performance %", ref targetPercentage, 10, 99, "%d%%"))
             {
                 this.configuration.TargetPercentage = targetPercentage;
                 this.configuration.Save();
@@ -73,11 +73,17 @@ namespace Slackingway.Windows
                 {
                     this.plugin.StartCalibration();
                 }
+
+                if (this.plugin.ShowCalibrationSuccess)
+                {
+                    ImGui.TextColored(new Vector4(0, 1, 0, 1), "Calibration Complete!");
+                }
+
                 ImGui.TextWrapped("Set this in a GPU limited scene to calibrate peak usage.");
             }
 
             ImGui.Text($"Current GPU Usage: {this.plugin.LastGpuUsage:F1}%");
-            ImGui.Text($"Baseline Max Usage: {this.configuration.BaselineGpuUsage:F1}%");
+            ImGui.Text($"Baseline Max Usage: {this.configuration.BaselineGpuUsage:F0}%");
         }
     }
 }
