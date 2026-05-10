@@ -85,7 +85,7 @@ namespace Slackingway
         /// </summary>
         public void Initialize()
         {
-            Task.Run(RefreshCountersAsync);
+            Task.Run(RefreshCounters);
         }
 
         /// <summary>
@@ -124,22 +124,30 @@ namespace Slackingway
 
             // Step 3: Check if we need to refresh the counters.
             // A refresh is needed if the game spawned a new GPU engine, or if the current engines went dormant.
-            if (totalUtilization <= 0)
+            bool needsRefresh;
+            lock (this.stateLock)
             {
-                this.consecutiveZeroReads++;
-            }
-            else
-            {
-                this.consecutiveZeroReads = 0;
-            }
+                if (totalUtilization <= 0)
+                {
+                    this.consecutiveZeroReads++;
+                }
+                else
+                {
+                    this.consecutiveZeroReads = 0;
+                }
 
-            bool needsRefresh = (this.consecutiveZeroReads >= 5 && (DateTime.UtcNow - this.lastRefreshTime).TotalSeconds > 10) ||
-                                ((DateTime.UtcNow - this.lastRefreshTime).TotalSeconds > 60);
+                needsRefresh = (this.consecutiveZeroReads >= 5 && (DateTime.UtcNow - this.lastRefreshTime).TotalSeconds > 10) ||
+                                    ((DateTime.UtcNow - this.lastRefreshTime).TotalSeconds > 60);
+
+                if (needsRefresh)
+                {
+                    this.consecutiveZeroReads = 0;
+                }
+            }
 
             if (needsRefresh)
             {
-                this.consecutiveZeroReads = 0;
-                Task.Run(RefreshCountersAsync);
+                Task.Run(RefreshCounters);
             }
 
             return totalUtilization;
@@ -148,7 +156,7 @@ namespace Slackingway
         /// <summary>
         /// Discovers the 3D GPU engines for the current process and sets up a new PDH query to monitor them.
         /// </summary>
-        private void RefreshCountersAsync()
+        private void RefreshCounters()
         {
             // Prevent multiple simultaneous refreshes.
             lock (this.stateLock)
@@ -166,61 +174,75 @@ namespace Slackingway
                     return;
                 }
 
-                var newCounters = new List<IntPtr>();
-
-                // Define the wildcard path to find all 3D GPU engines belonging to the current process.
-                string wildcardPath = $"\\GPU Engine(pid_{this.currentPid}_*_engtype_3D)\\Utilization Percentage";
-
-                // First pass: Determine the required buffer size for the expanded paths.
-                uint bufferSize = 0;
-                uint expandResult = PdhExpandWildCardPath(null, wildcardPath, IntPtr.Zero, ref bufferSize, 0);
-
-                if (expandResult == 0 || expandResult == PDH_MORE_DATA)
+                bool handleInstalled = false;
+                try
                 {
-                    // Allocate unmanaged memory for the paths string.
-                    IntPtr pPaths = Marshal.AllocHGlobal((int)bufferSize * 2); // * 2 because characters are unicode (2 bytes)
+                    var newCounters = new List<IntPtr>();
 
-                    // Second pass: Actually retrieve the expanded paths.
-                    if (PdhExpandWildCardPath(null, wildcardPath, pPaths, ref bufferSize, 0) == 0)
+                    // Define the wildcard path to find all 3D GPU engines belonging to the current process.
+                    string wildcardPath = $"\\GPU Engine(pid_{this.currentPid}_*_engtype_3D)\\Utilization Percentage";
+
+                    // First pass: Determine the required buffer size for the expanded paths.
+                    uint bufferSize = 0;
+                    uint expandResult = PdhExpandWildCardPath(null, wildcardPath, IntPtr.Zero, ref bufferSize, 0);
+
+                    if (expandResult == 0 || expandResult == PDH_MORE_DATA)
                     {
-                        // Read the unmanaged string and split it by the null terminator.
-                        string pathsStr = Marshal.PtrToStringUni(pPaths, (int)bufferSize);
-                        string[] paths = pathsStr.Split(new[] { '\0' }, StringSplitOptions.RemoveEmptyEntries);
+                        // Allocate unmanaged memory for the paths string.
+                        IntPtr pPaths = Marshal.AllocHGlobal((int)bufferSize * 2); // * 2 because characters are unicode (2 bytes)
 
-                        foreach (string path in paths)
+                        // Second pass: Actually retrieve the expanded paths.
+                        if (PdhExpandWildCardPath(null, wildcardPath, pPaths, ref bufferSize, 0) == 0)
                         {
-                            // Add each discovered engine to the new query.
-                            if (PdhAddCounter(newQueryHandle, path, IntPtr.Zero, out IntPtr counterHandle) == 0)
+                            // Read the unmanaged string and split it by the null terminator.
+                            string pathsStr = Marshal.PtrToStringUni(pPaths, (int)bufferSize);
+                            if (pathsStr != null)
                             {
-                                newCounters.Add(counterHandle);
+                                string[] paths = pathsStr.Split(new[] { '\0' }, StringSplitOptions.RemoveEmptyEntries);
+
+                                foreach (string path in paths)
+                                {
+                                    // Add each discovered engine to the new query.
+                                    if (PdhAddCounter(newQueryHandle, path, IntPtr.Zero, out IntPtr counterHandle) == 0)
+                                    {
+                                        newCounters.Add(counterHandle);
+                                    }
+                                }
                             }
                         }
+
+                        Marshal.FreeHGlobal(pPaths);
                     }
 
-                    Marshal.FreeHGlobal(pPaths);
+                    // Do one initial collect so the next call to GetFormattedCounterValue has a baseline to work with.
+                    PdhCollectQueryData(newQueryHandle);
+
+                    Plugin.Log.Info($"[Slackingway] GPU Monitor Refreshed. Found {newCounters.Count} 3D engines.");
+
+                    // Safely swap the new query and counters into the active state, and grab the old ones to clean up.
+                    IntPtr oldQueryHandle;
+                    lock (this.stateLock)
+                    {
+                        oldQueryHandle = this.activeQueryHandle;
+                        this.activeQueryHandle = newQueryHandle;
+                        this.activeCounterHandles = newCounters;
+                        this.lastRefreshTime = DateTime.UtcNow;
+                        handleInstalled = true;
+                    }
+
+                    // Cleanup the old query if it existed. This safely disposes of the old native resources.
+                    if (oldQueryHandle != IntPtr.Zero)
+                    {
+                        PdhCloseQuery(oldQueryHandle);
+                    }
                 }
-
-                // Do one initial collect so the next call to GetFormattedCounterValue has a baseline to work with.
-                PdhCollectQueryData(newQueryHandle);
-
-                Plugin.Log.Info($"[Slackingway] GPU Monitor Refreshed. Found {newCounters.Count} 3D engines.");
-
-                // Safely swap the new query and counters into the active state, and grab the old ones to clean up.
-                IntPtr oldQueryHandle;
-                lock (this.stateLock)
+                finally
                 {
-                    oldQueryHandle = this.activeQueryHandle;
-                    this.activeQueryHandle = newQueryHandle;
-                    this.activeCounterHandles = newCounters;
+                    if (!handleInstalled)
+                    {
+                        PdhCloseQuery(newQueryHandle);
+                    }
                 }
-
-                // Cleanup the old query if it existed. This safely disposes of the old native resources.
-                if (oldQueryHandle != IntPtr.Zero)
-                {
-                    PdhCloseQuery(oldQueryHandle);
-                }
-
-                this.lastRefreshTime = DateTime.UtcNow;
             }
             catch (Exception ex)
             {
