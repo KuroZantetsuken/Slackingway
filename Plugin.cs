@@ -39,8 +39,9 @@ namespace Slackingway
         public float LastGpuUsage { get; private set; } = 0;
 
         private double smoothedFrameTimeMs = 16.6;
+        private double smoothedActiveTimeMs = 16.6;
         private double targetFrameTimeMs = 16.6;
-        
+
         // PI Controller state (Velocity form)
         private double lastError = 0;
         private bool isControllerReset = true;
@@ -48,6 +49,7 @@ namespace Slackingway
         private const double Ki = 0.10; // ms per % error per second
 
         private Stopwatch logStopwatch = new Stopwatch();
+        private int framesThisSecond = 0;
 
         // Used for gradual transition when re-enabling
         private bool wasDisabled = true;
@@ -115,9 +117,22 @@ namespace Slackingway
             double elapsedMs = this.frameStopwatch.Elapsed.TotalMilliseconds;
             this.frameStopwatch.Restart();
 
+            double activeTimeMs = elapsedMs - this.previousSleepTimeMs;
+            if (activeTimeMs < 0) activeTimeMs = 0;
+
             if (elapsedMs > 0 && elapsedMs < 1000)
             {
                 this.smoothedFrameTimeMs = (this.smoothedFrameTimeMs * 0.85) + (elapsedMs * 0.15);
+                
+                // Fast downward tracking of active time to quickly recover from backgrounding
+                if (activeTimeMs < this.smoothedActiveTimeMs - 5.0)
+                {
+                    this.smoothedActiveTimeMs = (this.smoothedActiveTimeMs * 0.50) + (activeTimeMs * 0.50);
+                }
+                else
+                {
+                    this.smoothedActiveTimeMs = (this.smoothedActiveTimeMs * 0.85) + (activeTimeMs * 0.15);
+                }
             }
 
             if (this.gpuPollStopwatch.ElapsedMilliseconds >= 1000)
@@ -146,8 +161,35 @@ namespace Slackingway
                     double deltaError = error - this.lastError;
                     this.lastError = error;
 
-                    double adjustmentMs = (Kp * deltaError) + (Ki * error);
+                    // Instant release if we are massively underutilizing the GPU
+                    // This prevents jarring frame rate drops after alt-tabbing back into the game
+                    if (error < -15.0 && this.targetFrameTimeMs > this.smoothedActiveTimeMs + 1.0)
+                    {
+                        this.targetFrameTimeMs = this.smoothedActiveTimeMs;
+                    }
+
+                    double currentKi = Ki;
+                    if (error < -5.0)
+                    {
+                        currentKi = 0.40; // Faster downward recovery when underutilized
+                    }
+
+                    double adjustmentMs = (Kp * deltaError) + (currentKi * error);
                     this.targetFrameTimeMs += adjustmentMs;
+
+                    // Dynamic Bounds based on physical rendering capability
+                    double targetRatio = targetGpuUsage / 100.0;
+                    double minTarget = this.smoothedActiveTimeMs - 2.0;
+                    double maxTarget = (this.smoothedActiveTimeMs / targetRatio) * 1.1;
+
+                    if (this.targetFrameTimeMs < minTarget)
+                    {
+                        this.targetFrameTimeMs = minTarget;
+                    }
+                    else if (this.targetFrameTimeMs > maxTarget)
+                    {
+                        this.targetFrameTimeMs = maxTarget;
+                    }
 
                     if (this.targetFrameTimeMs > 1000) this.targetFrameTimeMs = 1000;
                     if (this.targetFrameTimeMs < 1) this.targetFrameTimeMs = 1;
@@ -176,10 +218,7 @@ namespace Slackingway
                 }
             }
 
-            double activeTimeMs = elapsedMs - this.previousSleepTimeMs;
-
             // Handle abnormal frame times
-            if (activeTimeMs < 0) activeTimeMs = 0;
             if (activeTimeMs > 1000)
             {
                 this.previousSleepTimeMs = 0;
@@ -208,13 +247,15 @@ namespace Slackingway
                 this.previousSleepTimeMs = 0;
             }
 
+            this.framesThisSecond++;
             if (this.Configuration.EnableLogging)
             {
                 if (this.logStopwatch.ElapsedMilliseconds >= 1000) // Log every 1 second
                 {
                     this.logStopwatch.Restart();
-                    double currentFps = 1000.0 / elapsedMs;
-                    Log.Info($"[Slackingway] FPS: {currentFps:F1} | GPU Usage: {this.LastGpuUsage:F1}% | TargetFrame: {this.targetFrameTimeMs:F2}ms | Active: {activeTimeMs:F2}ms | ReqSleep: {requiredSleepMs:F2}ms | ActualSleep: {actualSleepMs:F2}ms");
+                    double averageFps = this.framesThisSecond;
+                    this.framesThisSecond = 0;
+                    Log.Info($"[Slackingway] FPS: {averageFps:F1} | GPU Usage: {this.LastGpuUsage:F1}% | TargetFrame: {this.targetFrameTimeMs:F2}ms | Active: {activeTimeMs:F2}ms | ReqSleep: {requiredSleepMs:F2}ms | ActualSleep: {actualSleepMs:F2}ms");
                 }
             }
         }
