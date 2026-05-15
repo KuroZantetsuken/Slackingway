@@ -1,0 +1,101 @@
+name: Build Release
+
+on:
+  push:
+    branches:
+      - main
+    paths-ignore:
+      - 'README.md'
+      - '.gitignore'
+  workflow_dispatch:
+
+jobs:
+  release:
+    runs-on: windows-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+
+      - name: Download Dalamud
+        run: |
+          Invoke-WebRequest -Uri https://goatcorp.github.io/dalamud-distrib/latest.zip -OutFile dalamud.zip
+          Expand-Archive -Force dalamud.zip "$env:APPDATA\XIVLauncher\addon\Hooks\dev"
+
+      - name: Build Plugin
+        run: |
+          $Version = "1.0.${{ github.run_number }}"
+          dotnet build -c Release -p:Version=$Version
+
+      - name: Prepare Package
+        run: |
+          $Version = "1.0.${{ github.run_number }}"
+          $PluginName = "Slackingway"
+          
+          $OutDir = "bin/Release/$PluginName"
+          
+          mkdir release
+          Copy-Item "$OutDir\latest.zip" -Destination "release\$PluginName.zip"
+          
+          # Read the plugin JSON
+          $PluginJson = Get-Content "$OutDir\$PluginName.json" -Raw | ConvertFrom-Json
+          
+          # Create pluginmaster.json
+          $PluginMaster = @($PluginJson)
+          $PluginMaster[0] | Add-Member -Type NoteProperty -Name "AssemblyVersion" -Value "$Version.0" -Force
+          $PluginMaster[0] | Add-Member -Type NoteProperty -Name "DownloadLinkInstall" -Value "https://github.com/${{ github.repository }}/releases/download/v$Version/$PluginName.zip"
+          $PluginMaster[0] | Add-Member -Type NoteProperty -Name "DownloadLinkUpdate" -Value "https://github.com/${{ github.repository }}/releases/download/v$Version/$PluginName.zip"
+          $PluginMaster[0] | Add-Member -Type NoteProperty -Name "DownloadLinkTesting" -Value "https://github.com/${{ github.repository }}/releases/download/v$Version/$PluginName.zip"
+          
+          $JsonString = $PluginMaster | ConvertTo-Json -Depth 10
+          "[" + $JsonString + "]" | Set-Content "release\pluginmaster.json"
+
+      - name: Generate Changelog
+        id: changelog
+        shell: bash
+        run: |
+          LATEST_TAG=$(git describe --tags --abbrev=0 2>/dev/null || echo "")
+          if [ -z "$LATEST_TAG" ]; then
+            CHANGELOG=$(git log --pretty=format:"* %s (%h)" --no-merges)
+          else
+            CHANGELOG=$(git log ${LATEST_TAG}..HEAD --pretty=format:"* %s (%h)" --no-merges)
+          fi
+          if [ -z "$CHANGELOG" ]; then
+            CHANGELOG=$(git log -1 --pretty=format:"* %s (%h)")
+          fi
+          echo "changelog<<EOF" >> $GITHUB_OUTPUT
+          echo "$CHANGELOG" >> $GITHUB_OUTPUT
+          echo "EOF" >> $GITHUB_OUTPUT
+
+      - name: Create Versioned Release
+        if: github.ref == 'refs/heads/main'
+        uses: softprops/action-gh-release@v1
+        with:
+          tag_name: v1.0.${{ github.run_number }}
+          name: v1.0.${{ github.run_number }}
+          body: |
+            ### Changes since last release:
+            ${{ steps.changelog.outputs.changelog }}
+          files: release/${{ env.PLUGIN_NAME }}.zip
+          draft: false
+          prerelease: false
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PLUGIN_NAME: Slackingway
+
+      - name: Update pluginmaster.json in Repo
+        if: github.ref == 'refs/heads/main'
+        shell: bash
+        run: |
+          cp release/pluginmaster.json .
+          git config --global user.name "github-actions[bot]"
+          git config --global user.email "github-actions[bot]@users.noreply.github.com"
+          git add pluginmaster.json
+          git commit -m "Update pluginmaster.json for v1.0.${{ github.run_number }} [skip ci]" || echo "No changes to commit"
+          git push
