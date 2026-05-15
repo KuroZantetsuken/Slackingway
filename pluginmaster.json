@@ -1,0 +1,25 @@
+[{
+  "Author": "KuroZantetsuken",
+  "Name": "Slackingway",
+  "InternalName": "Slackingway",
+  "Description": "Dynamic frame rate limiter to allow GPU headroom for Windows to do other things, preventing other apps like Discord and YouTube from freezing when FFXIV is in focus.",
+  "ApplicableVersion": "any",
+  "RepoUrl": "https://github.com/KuroZantetsuken/Slackingway",
+  "Tags": [
+    "fps",
+    "limiter",
+    "performance",
+    "graphics"
+  ],
+  "DalamudApiLevel": 15,
+  "LoadRequiredState": 0,
+  "LoadSync": false,
+  "CanUnloadAsync": false,
+  "LoadPriority": 0,
+  "Punchline": "Limits frame rate based on GPU usage.",
+  "AcceptsFeedback": true,
+  "AssemblyVersion": "1.0.2.0",
+  "DownloadLinkInstall": "https://github.com/KuroZantetsuken/Slackingway/releases/download/v1.0.2/Slackingway.zip",
+  "DownloadLinkUpdate": "https://github.com/KuroZantetsuken/Slackingway/releases/download/v1.0.2/Slackingway.zip",
+  "DownloadLinkTesting": "https://github.com/KuroZantetsuken/Slackingway/releases/download/v1.0.2/Slackingway.zip"
+}]
